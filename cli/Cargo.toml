@@ -28,7 +28,9 @@ borsh = { workspace = true }
 hex = "0.4"
 anyhow = "1.0"
 
-# LEZ deps for transaction building
-nssa_core = { git = "https://github.com/logos-blockchain/lssa.git", rev = "767b5afd388c7981bcdf6f5b5c80159607e07e5b", features = ["host"] }
-nssa = { git = "https://github.com/logos-blockchain/lssa.git", rev = "767b5afd388c7981bcdf6f5b5c80159607e07e5b" }
-wallet = { git = "https://github.com/logos-blockchain/lssa.git", rev = "767b5afd388c7981bcdf6f5b5c80159607e07e5b" }
+# nssa deps for transaction building
+nssa_core = { workspace = true }
+nssa = { workspace = true }
+common = { workspace = true }
+wallet = { workspace = true }
+sequencer_service_rpc = { workspace = true }

@@ -171,7 +171,7 @@ pub fn registry_state_pda_seed() -> PdaSeed {
 
 /// Compute the on-chain AccountId (PDA) for the singleton registry state.
 pub fn compute_registry_state_pda(program_id: &ProgramId) -> AccountId {
-    AccountId::from((program_id, &registry_state_pda_seed()))
+    AccountId::for_public_pda(program_id, &registry_state_pda_seed())
 }
 
 /// Convert a `ProgramId` ([u32; 8]) to a canonical 32-byte big-endian representation.
@@ -207,7 +207,7 @@ pub fn program_entry_pda_seed(program_id: &ProgramId) -> PdaSeed {
 
 /// Compute the on-chain AccountId (PDA) for a program entry.
 pub fn compute_program_entry_pda(registry_program_id: &ProgramId, program_id: &ProgramId) -> AccountId {
-    AccountId::from((registry_program_id, &program_entry_pda_seed(program_id)))
+    AccountId::for_public_pda(registry_program_id, &program_entry_pda_seed(program_id))
 }
 
 // ---------------------------------------------------------------------------

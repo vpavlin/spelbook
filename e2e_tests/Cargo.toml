@@ -9,12 +9,12 @@ path = "tests/e2e_registry.rs"
 
 [dependencies]
 registry_core = { path = "../registry_core" }
-nssa = { git = "https://github.com/logos-blockchain/lssa.git", rev = "767b5afd388c7981bcdf6f5b5c80159607e07e5b" }
-nssa_core = { git = "https://github.com/logos-blockchain/lssa.git", rev = "767b5afd388c7981bcdf6f5b5c80159607e07e5b", features = ["host"] }
-common = { git = "https://github.com/logos-blockchain/lssa.git", rev = "767b5afd388c7981bcdf6f5b5c80159607e07e5b" }
-risc0-zkvm = "3.0"
-borsh = "1.5"
-tokio = { version = "1", features = ["full"] }
+nssa = { workspace = true }
+nssa_core = { workspace = true }
+common = { workspace = true }
+risc0-zkvm = { workspace = true }
+borsh = { workspace = true }
+tokio = { workspace = true }
 
 [lib]
 path = "src/lib.rs"

@@ -1,21 +1,23 @@
 //! Registry operation implementations for the FFI layer.
 //!
 //! Each function takes a JSON args string and returns a JSON result string.
-//! Transaction building follows the same pattern as lez-multisig/cli.
+//! Transaction building follows the same pattern as the spel-client-gen generated code
+//! and lez-multisig-ffi, using logos-execution-zone at v0.2.0-rc3.
 //!
 //! Common JSON input fields:
 //! - `sequencer_url`: e.g. "http://127.0.0.1:3040"
 //! - `wallet_path`:   path to the LEZ wallet directory (sets NSSA_WALLET_HOME_DIR)
-//! - `program_id_hex`: 64-char hex string identifying the registry program binary
+//! - `registry_program_id`: 64-char hex string identifying the registry program binary
 
 use nssa::{
     public_transaction::{Message, WitnessSet},
-    AccountId, PublicTransaction,
+    AccountId, ProgramId, PublicTransaction,
 };
 use registry_core::{
     compute_program_entry_pda, compute_registry_state_pda, Instruction, ProgramEntry, RegistryState,
 };
 use serde_json::{json, Value};
+use sequencer_service_rpc::RpcClient as _;
 use wallet::WalletCore;
 
 use crate::cache;
@@ -34,7 +36,7 @@ fn get_str<'a>(v: &'a Value, key: &str) -> Result<&'a str, String> {
 
 /// Parse a 64-hex-char program_id string into [u32; 8] (little-endian words).
 /// Matches the spel-client-gen convention used by lez-multisig and all spel-generated FFI clients.
-fn parse_program_id_hex(s: &str) -> Result<nssa::ProgramId, String> {
+fn parse_program_id_hex(s: &str) -> Result<ProgramId, String> {
     let s = s.trim_start_matches("0x");
     if s.len() != 64 {
         return Err(format!("program_id_hex must be 64 hex chars (got {})", s.len()));
@@ -47,75 +49,99 @@ fn parse_program_id_hex(s: &str) -> Result<nssa::ProgramId, String> {
     Ok(pid)
 }
 
-/// Submit a transaction and wait for confirmation.
-async fn submit_and_wait(
-    client: &common::sequencer_client::SequencerClient,
-    tx: PublicTransaction,
-) -> Result<String, String> {
-    let response = client
-        .send_tx_public(tx)
-        .await
-        .map_err(|e| format!("failed to submit transaction: {}", e))?;
-
-    Ok(response.tx_hash.to_string())
+/// Parse an AccountId from a string (base58, hex, or "Public/<id>" form).
+fn parse_account_id(s: &str) -> Result<AccountId, String> {
+    let raw = s;
+    let s = s.strip_prefix("Public/").or_else(|| s.strip_prefix("Private/")).unwrap_or(s);
+    if let Ok(id) = s.parse() {
+        return Ok(id);
+    }
+    let s = s.trim_start_matches("0x");
+    if s.len() == 64 {
+        let bytes = hex::decode(s).map_err(|e| format!("invalid hex: {}", e))?;
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&bytes);
+        return Ok(AccountId::new(arr));
+    }
+    Err(format!("invalid AccountId: {}", raw))
 }
 
-/// Build + submit a signed transaction for a registry instruction.
+static ASYNC_RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+fn get_runtime() -> &'static tokio::runtime::Runtime {
+    ASYNC_RUNTIME.get_or_init(|| tokio::runtime::Runtime::new().expect("failed to create Tokio runtime"))
+}
+
+static WALLET_INIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Initialize WalletCore from JSON args (reads wallet_path and sequencer_url).
+fn init_wallet(v: &Value) -> Result<WalletCore, String> {
+    let _guard = WALLET_INIT_LOCK.lock().map_err(|_| "wallet lock poisoned".to_string())?;
+    let wallet_path = v["wallet_path"].as_str().ok_or("missing required field: wallet_path")?;
+    if wallet_path.is_empty() || wallet_path.contains('\0') {
+        return Err("wallet_path must be a non-empty path without null bytes".into());
+    }
+    let sequencer_url = v["sequencer_url"].as_str().ok_or("missing required field: sequencer_url")?;
+    std::env::set_var("NSSA_WALLET_HOME_DIR", wallet_path);
+    std::env::set_var("NSSA_SEQUENCER_URL", sequencer_url);
+    WalletCore::from_env().map_err(|e| format!("wallet init: {}", e))
+}
+
+/// Build + submit a signed transaction for a registry instruction using the new logos-execution-zone API.
 async fn submit_signed_registry_tx(
-    wallet_core: &WalletCore,
-    registry_program_id: nssa::ProgramId,
+    wallet: &WalletCore,
+    registry_program_id: ProgramId,
     account_ids: Vec<AccountId>,
-    signer_id: AccountId,
+    signer_ids: Vec<AccountId>,
     instruction: Instruction,
 ) -> Result<String, String> {
-    let nonces = wallet_core
-        .get_accounts_nonces(vec![signer_id])
+    let nonces = wallet
+        .get_accounts_nonces(signer_ids.clone())
         .await
-        .map_err(|e| format!("failed to get nonces: {}", e))?;
+        .map_err(|e| format!("nonces: {}", e))?;
 
-    let signing_key = wallet_core
-        .storage()
-        .user_data
-        .get_pub_account_signing_key(signer_id)
-        .ok_or_else(|| {
-            format!(
-                "signing key not found for account {} — is it in your wallet?",
-                signer_id
-            )
-        })?;
+    let mut signing_keys = Vec::new();
+    for sid in &signer_ids {
+        let key = wallet
+            .storage()
+            .user_data
+            .get_pub_account_signing_key(*sid)
+            .ok_or_else(|| format!("signing key not found for {} — is it in your wallet?", sid))?;
+        signing_keys.push(key);
+    }
 
     let message = Message::try_new(registry_program_id, account_ids, nonces, instruction)
-        .map_err(|e| format!("failed to build message: {:?}", e))?;
-
-    let witness_set = WitnessSet::for_message(&message, &[signing_key]);
+        .map_err(|e| format!("message: {:?}", e))?;
+    let witness_set = WitnessSet::for_message(&message, &signing_keys);
     let tx = PublicTransaction::new(message, witness_set);
 
-    submit_and_wait(&wallet_core.sequencer_client, tx).await
+    let raw = wallet
+        .sequencer_client
+        .send_transaction(common::transaction::NSSATransaction::Public(tx))
+        .await
+        .map_err(|e| format!("submit: {}", e))?;
+    let tx_hash_hex = hex::encode(raw.0);
+    let poller = wallet::poller::TxPoller::new(wallet.config(), wallet.sequencer_client.clone());
+    poller.poll_tx(raw).await.map_err(|e| format!("confirm: {}", e))?;
+
+    Ok(tx_hash_hex)
 }
 
 /// Fetch and deserialize a Borsh-encoded account.
 async fn fetch_borsh_account<T: borsh::BorshDeserialize>(
-    wallet_core: &WalletCore,
+    wallet: &WalletCore,
     account_id: AccountId,
 ) -> Result<Option<T>, String> {
-    let account = wallet_core
-        .get_account_public(account_id)
+    let account = wallet
+        .sequencer_client
+        .get_account(account_id)
         .await
         .map_err(|e| format!("failed to fetch account {}: {}", account_id, e))?;
-    let data: Vec<u8> = account.data.into();
-    if data.is_empty() {
+    if account.data.is_empty() {
         return Ok(None);
     }
-    let decoded = borsh::from_slice::<T>(&data).map_err(|e| format!("failed to deserialize account data: {}", e))?;
+    let decoded = borsh::from_slice::<T>(&account.data)
+        .map_err(|e| format!("failed to deserialize account data: {}", e))?;
     Ok(Some(decoded))
-}
-
-/// Load WalletCore with optional wallet_path override.
-fn load_wallet(wallet_path: Option<&str>) -> Result<WalletCore, String> {
-    if let Some(path) = wallet_path {
-        std::env::set_var("NSSA_WALLET_HOME_DIR", path);
-    }
-    WalletCore::from_env().map_err(|e| format!("failed to load wallet: {}", e))
 }
 
 // ---------------------------------------------------------------------------
@@ -127,16 +153,16 @@ fn load_wallet(wallet_path: Option<&str>) -> Result<WalletCore, String> {
 /// Args JSON:
 /// ```json
 /// {
-///   "sequencer_url":    "http://127.0.0.1:3040",
-///   "wallet_path":      "/path/to/wallet",
+///   "sequencer_url":       "http://127.0.0.1:3040",
+///   "wallet_path":         "/path/to/wallet",
 ///   "registry_program_id": "...(64 hex chars)...",
-///   "account":          "<author AccountId base58>",
-///   "program_id":       "...(64 hex chars)...",
-///   "name":             "lez-multisig",
-///   "version":          "0.1.0",
-///   "idl_cid":          "bafy...",
-///   "description":      "M-of-N multisig governance",
-///   "tags":             ["governance", "multisig"]
+///   "account":             "<author AccountId>",
+///   "program_id":          "...(64 hex chars)...",
+///   "name":                "lez-multisig",
+///   "version":             "0.1.0",
+///   "idl_cid":             "bafy...",
+///   "description":         "M-of-N multisig governance",
+///   "tags":                ["governance", "multisig"]
 /// }
 /// ```
 pub fn register(args: &str) -> String {
@@ -145,20 +171,11 @@ pub fn register(args: &str) -> String {
         Err(e) => return json!({"success": false, "error": e}).to_string(),
     };
 
-    let rt = match tokio::runtime::Runtime::new() {
-        Ok(rt) => rt,
-        Err(e) => return json!({"success": false, "error": format!("runtime error: {}", e)}).to_string(),
-    };
-
+    let rt = get_runtime();
     rt.block_on(async { register_async(&v).await })
 }
 
 async fn register_async(v: &Value) -> String {
-    let sequencer_url = match get_str(v, "sequencer_url") {
-        Ok(s) => s.to_string(),
-        Err(e) => return json!({"success": false, "error": e}).to_string(),
-    };
-    let wallet_path = v["wallet_path"].as_str();
     let registry_prog_id_hex = match get_str(v, "registry_program_id") {
         Ok(s) => s,
         Err(e) => return json!({"success": false, "error": e}).to_string(),
@@ -201,19 +218,17 @@ async fn register_async(v: &Value) -> String {
         Ok(id) => id,
         Err(e) => return json!({"success": false, "error": e}).to_string(),
     };
-    let author_id: AccountId = match account_str.parse() {
+    let author_id = match parse_account_id(account_str) {
         Ok(id) => id,
-        Err(e) => return json!({"success": false, "error": format!("invalid account id: {:?}", e)}).to_string(),
+        Err(e) => return json!({"success": false, "error": format!("invalid account id: {}", e)}).to_string(),
     };
 
-    // Override sequencer URL in env for wallet
-    std::env::set_var("NSSA_SEQUENCER_URL", &sequencer_url);
-
-    let wallet_core = match load_wallet(wallet_path) {
+    let wallet = match init_wallet(v) {
         Ok(w) => w,
         Err(e) => return json!({"success": false, "error": e}).to_string(),
     };
 
+    // Compute PDAs using registry_core helpers
     let registry_state_id = compute_registry_state_pda(&registry_program_id);
     let entry_pda_id = compute_program_entry_pda(&registry_program_id, &program_id);
 
@@ -227,10 +242,10 @@ async fn register_async(v: &Value) -> String {
     };
 
     match submit_signed_registry_tx(
-        &wallet_core,
+        &wallet,
         registry_program_id,
         vec![registry_state_id, author_id, entry_pda_id],
-        author_id,
+        vec![author_id],
         instruction,
     )
     .await
@@ -271,7 +286,7 @@ async fn register_async(v: &Value) -> String {
 ///   "sequencer_url":       "http://127.0.0.1:3040",
 ///   "wallet_path":         "/path/to/wallet",
 ///   "registry_program_id": "...(64 hex chars)...",
-///   "account":             "<author AccountId base58>",
+///   "account":             "<author AccountId>",
 ///   "program_id":          "...(64 hex chars)...",
 ///   "version":             "0.2.0",
 ///   "idl_cid":             "bafy...",
@@ -285,20 +300,11 @@ pub fn update(args: &str) -> String {
         Err(e) => return json!({"success": false, "error": e}).to_string(),
     };
 
-    let rt = match tokio::runtime::Runtime::new() {
-        Ok(rt) => rt,
-        Err(e) => return json!({"success": false, "error": format!("runtime error: {}", e)}).to_string(),
-    };
-
+    let rt = get_runtime();
     rt.block_on(async { update_async(&v).await })
 }
 
 async fn update_async(v: &Value) -> String {
-    let sequencer_url = match get_str(v, "sequencer_url") {
-        Ok(s) => s.to_string(),
-        Err(e) => return json!({"success": false, "error": e}).to_string(),
-    };
-    let wallet_path = v["wallet_path"].as_str();
     let registry_prog_id_hex = match get_str(v, "registry_program_id") {
         Ok(s) => s,
         Err(e) => return json!({"success": false, "error": e}).to_string(),
@@ -330,18 +336,17 @@ async fn update_async(v: &Value) -> String {
         Ok(id) => id,
         Err(e) => return json!({"success": false, "error": e}).to_string(),
     };
-    let author_id: AccountId = match account_str.parse() {
+    let author_id = match parse_account_id(account_str) {
         Ok(id) => id,
-        Err(e) => return json!({"success": false, "error": format!("invalid account id: {:?}", e)}).to_string(),
+        Err(e) => return json!({"success": false, "error": format!("invalid account id: {}", e)}).to_string(),
     };
 
-    std::env::set_var("NSSA_SEQUENCER_URL", &sequencer_url);
-
-    let wallet_core = match load_wallet(wallet_path) {
+    let wallet = match init_wallet(v) {
         Ok(w) => w,
         Err(e) => return json!({"success": false, "error": e}).to_string(),
     };
 
+    // Compute PDAs using registry_core helpers
     let registry_state_id = compute_registry_state_pda(&registry_program_id);
     let entry_pda_id = compute_program_entry_pda(&registry_program_id, &program_id);
 
@@ -354,10 +359,10 @@ async fn update_async(v: &Value) -> String {
     };
 
     match submit_signed_registry_tx(
-        &wallet_core,
+        &wallet,
         registry_program_id,
         vec![registry_state_id, author_id, entry_pda_id],
-        author_id,
+        vec![author_id],
         instruction,
     )
     .await
@@ -387,29 +392,17 @@ async fn update_async(v: &Value) -> String {
 /// ```json
 /// {"success": true, "program_count": 3, "note": "..."}
 /// ```
-///
-/// Note: Full enumeration requires an off-chain indexer in v1.
-/// The state PDA only stores the count.
 pub fn list(args: &str) -> String {
     let v = match parse_args(args) {
         Ok(v) => v,
         Err(e) => return json!({"success": false, "error": e}).to_string(),
     };
 
-    let rt = match tokio::runtime::Runtime::new() {
-        Ok(rt) => rt,
-        Err(e) => return json!({"success": false, "error": format!("runtime error: {}", e)}).to_string(),
-    };
-
+    let rt = get_runtime();
     rt.block_on(async { list_async(&v).await })
 }
 
 async fn list_async(v: &Value) -> String {
-    let sequencer_url = match get_str(v, "sequencer_url") {
-        Ok(s) => s.to_string(),
-        Err(e) => return json!({"success": false, "error": e}).to_string(),
-    };
-    let wallet_path = v["wallet_path"].as_str();
     let registry_prog_id_hex = match get_str(v, "registry_program_id") {
         Ok(s) => s,
         Err(e) => return json!({"success": false, "error": e}).to_string(),
@@ -420,16 +413,14 @@ async fn list_async(v: &Value) -> String {
         Err(e) => return json!({"success": false, "error": e}).to_string(),
     };
 
-    std::env::set_var("NSSA_SEQUENCER_URL", &sequencer_url);
-
-    let wallet_core = match load_wallet(wallet_path) {
+    let wallet = match init_wallet(v) {
         Ok(w) => w,
         Err(e) => return json!({"success": false, "error": e}).to_string(),
     };
 
     let registry_state_id = compute_registry_state_pda(&registry_program_id);
 
-    match fetch_borsh_account::<RegistryState>(&wallet_core, registry_state_id).await {
+    match fetch_borsh_account::<RegistryState>(&wallet, registry_state_id).await {
         Ok(None) => json!({
             "success": true,
             "program_count": 0,
@@ -452,18 +443,7 @@ async fn list_async(v: &Value) -> String {
 /// Get a single program entry by name.
 ///
 /// Note: In v1, PDA derivation is by program_id (hash), not by name.
-/// This function searches known PDAs — for a full name-based scan, an
-/// off-chain indexer is needed. Currently returns an informative message.
-///
-/// Args JSON:
-/// ```json
-/// {
-///   "sequencer_url":       "http://127.0.0.1:3040",
-///   "wallet_path":         "/path/to/wallet",
-///   "registry_program_id": "...(64 hex chars)...",
-///   "name":                "lez-multisig"
-/// }
-/// ```
+/// Returns an informative error directing callers to use get_by_id.
 pub fn get_by_name(args: &str) -> String {
     let v = match parse_args(args) {
         Ok(v) => v,
@@ -476,7 +456,6 @@ pub fn get_by_name(args: &str) -> String {
     };
 
     // In v1, name-based lookup requires the program_id to derive the PDA.
-    // Return a clear message explaining this limitation.
     json!({
         "success": false,
         "error": format!(
@@ -505,20 +484,11 @@ pub fn get_by_id(args: &str) -> String {
         Err(e) => return json!({"success": false, "error": e}).to_string(),
     };
 
-    let rt = match tokio::runtime::Runtime::new() {
-        Ok(rt) => rt,
-        Err(e) => return json!({"success": false, "error": format!("runtime error: {}", e)}).to_string(),
-    };
-
+    let rt = get_runtime();
     rt.block_on(async { get_by_id_async(&v).await })
 }
 
 async fn get_by_id_async(v: &Value) -> String {
-    let sequencer_url = match get_str(v, "sequencer_url") {
-        Ok(s) => s.to_string(),
-        Err(e) => return json!({"success": false, "error": e}).to_string(),
-    };
-    let wallet_path = v["wallet_path"].as_str();
     let registry_prog_id_hex = match get_str(v, "registry_program_id") {
         Ok(s) => s,
         Err(e) => return json!({"success": false, "error": e}).to_string(),
@@ -537,16 +507,14 @@ async fn get_by_id_async(v: &Value) -> String {
         Err(e) => return json!({"success": false, "error": e}).to_string(),
     };
 
-    std::env::set_var("NSSA_SEQUENCER_URL", &sequencer_url);
-
-    let wallet_core = match load_wallet(wallet_path) {
+    let wallet = match init_wallet(v) {
         Ok(w) => w,
         Err(e) => return json!({"success": false, "error": e}).to_string(),
     };
 
     let entry_pda_id = compute_program_entry_pda(&registry_program_id, &program_id);
 
-    match fetch_borsh_account::<ProgramEntry>(&wallet_core, entry_pda_id).await {
+    match fetch_borsh_account::<ProgramEntry>(&wallet, entry_pda_id).await {
         Ok(None) => json!({
             "success": false,
             "error": "program entry not found",

@@ -1,0 +1,108 @@
+{
+  "accounts": [],
+  "errors": [],
+  "instruction_type": "registry_core::Instruction",
+  "instructions": [
+    {
+      "accounts": [
+        {
+          "init": false,
+          "name": "registry_state",
+          "signer": false,
+          "writable": true
+        },
+        {
+          "init": false,
+          "name": "author",
+          "signer": true,
+          "writable": false
+        },
+        {
+          "init": true,
+          "name": "program_entry_pda",
+          "signer": false,
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "program_id",
+          "type": "program_id"
+        },
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "idl_cid",
+          "type": "string"
+        },
+        {
+          "name": "description",
+          "type": "string"
+        },
+        {
+          "name": "tags",
+          "type": {
+            "vec": "string"
+          }
+        }
+      ],
+      "name": "register"
+    },
+    {
+      "accounts": [
+        {
+          "init": false,
+          "name": "registry_state",
+          "signer": false,
+          "writable": true
+        },
+        {
+          "init": false,
+          "name": "author",
+          "signer": true,
+          "writable": false
+        },
+        {
+          "init": false,
+          "name": "program_entry_pda",
+          "signer": false,
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "program_id",
+          "type": "program_id"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "idl_cid",
+          "type": "string"
+        },
+        {
+          "name": "description",
+          "type": "string"
+        },
+        {
+          "name": "tags",
+          "type": {
+            "vec": "string"
+          }
+        }
+      ],
+      "name": "update"
+    }
+  ],
+  "name": "registry_program",
+  "types": [],
+  "version": "0.1.0"
+}
