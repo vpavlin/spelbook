@@ -14,8 +14,7 @@ name = "generate_idl"
 path = "src/bin/generate_idl.rs"
 
 [dependencies]
-lez-framework = { workspace = true }
-lez-cli = { workspace = true }
+spel-framework = { workspace = true }
 registry_core = { path = "../registry_core" }
 tokio = { workspace = true }
 serde_json = { workspace = true }

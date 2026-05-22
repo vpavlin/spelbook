@@ -8,8 +8,8 @@
 // - accounts[1]: author account (must be authorized signer and match stored author)
 // - accounts[2]: program_entry PDA (must be initialized, author must match)
 
-use lez_framework::prelude::AccountWithMetadata;
-use lez_framework::prelude::{AccountPostState, ChainedCall};
+use spel_framework::prelude::AccountWithMetadata;
+use spel_framework::prelude::{AccountPostState, ChainedCall};
 use registry_core::{ProgramEntry, UpdateArgs};
 
 /// Handle the Update instruction.

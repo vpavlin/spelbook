@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 registry_core = { path = "../registry_core" }
 # nssa_core moved to dev-dependencies
-lez-framework = { workspace = true }
+spel-framework = { workspace = true }
 serde = { workspace = true }
 borsh = { workspace = true }
 risc0-zkvm = { workspace = true }

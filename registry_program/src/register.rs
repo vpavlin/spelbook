@@ -7,9 +7,9 @@
 // - accounts[1]: author account (must be authorized signer)
 // - accounts[2]: program_entry PDA (must be uninitialized — Account::default())
 
-use lez_framework::prelude::{Account, AccountWithMetadata};
-use lez_framework::prelude::{AccountPostState, ChainedCall};
-use registry_core::{ProgramEntry, RegisterArgs, RegistryState};
+use spel_framework::prelude::{Account, AccountWithMetadata};
+use spel_framework::prelude::{AccountPostState, ChainedCall, Claim};
+use registry_core::{ProgramEntry, RegisterArgs, RegistryState, registry_state_pda_seed, program_entry_pda_seed};
 
 /// Handle the Register instruction.
 ///
@@ -90,9 +90,9 @@ pub fn handle(
     // where the account is already owned by this program will use new() semantics.
     (
         vec![
-            AccountPostState::new_claimed_if_default(registry_state_post),
-            AccountPostState::new_claimed_if_default(author_post),
-            AccountPostState::new_claimed(program_entry_post),
+            AccountPostState::new_claimed_if_default(registry_state_post, Claim::Pda(registry_state_pda_seed())),
+            AccountPostState::new(author_post),
+            AccountPostState::new_claimed(program_entry_post, Claim::Pda(program_entry_pda_seed(&args.program_id))),
         ],
         vec![],
     )

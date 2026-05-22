@@ -10,7 +10,7 @@ path = "src/bin/registry.rs"
 [dependencies]
 registry_core = { path = "../../registry_core" }
 registry_program = { path = "../../registry_program" }
-lez-framework = { workspace = true }
+spel-framework = { workspace = true }
 nssa_core = { workspace = true }
 risc0-zkvm = { workspace = true }
 borsh = { workspace = true }

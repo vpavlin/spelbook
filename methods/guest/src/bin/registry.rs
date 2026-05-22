@@ -1,6 +1,6 @@
 #![no_main]
 
-use lez_framework::prelude::*;
+use spel_framework::prelude::*;
 
 risc0_zkvm::guest::entry!(main);
 
@@ -9,7 +9,7 @@ mod registry_program {
     #[allow(unused_imports)]
     use super::*;
     use ::registry_program as handlers;
-    use lez_framework::prelude::AccountWithMetadata;
+    use spel_framework::prelude::AccountWithMetadata;
 
     /// Register a new program in the on-chain registry.
     ///
@@ -28,9 +28,8 @@ mod registry_program {
         idl_cid: String,
         description: String,
         tags: Vec<String>,
-    ) -> LezResult {
+    ) -> SpelResult {
         let accounts = vec![registry_state, author, program_entry_pda];
-
         let args = registry_core::RegisterArgs {
             program_id,
             name,
@@ -39,12 +38,15 @@ mod registry_program {
             description,
             tags,
         };
-
-        // Use 0 as timestamp placeholder (zkvm guests don't have system time)
-        let timestamp: u64 = 0;
-
-        let (post_states, chained_calls) = handlers::register::handle(&accounts, &args, timestamp);
-        Ok(LezOutput::with_chained_calls(post_states, chained_calls))
+        let (post_states, chained_calls) = handlers::register::handle(&accounts, &args, 0);
+        let accs: Vec<Account> = post_states.iter().map(|ps| ps.account().clone()).collect();
+        let claims: Vec<AutoClaim> = post_states.iter().map(|ps| {
+            match ps.required_claim() {
+                Some(claim) => AutoClaim::Claimed(claim),
+                None => AutoClaim::None,
+            }
+        }).collect();
+        Ok(SpelOutput::execute_with_claims(&accs, &claims, chained_calls))
     }
 
     /// Update metadata for an existing registered program.
@@ -63,9 +65,8 @@ mod registry_program {
         idl_cid: String,
         description: String,
         tags: Vec<String>,
-    ) -> LezResult {
+    ) -> SpelResult {
         let accounts = vec![registry_state, author, program_entry_pda];
-
         let args = registry_core::UpdateArgs {
             program_id,
             version,
@@ -73,8 +74,14 @@ mod registry_program {
             description,
             tags,
         };
-
         let (post_states, chained_calls) = handlers::update::handle(&accounts, &args);
-        Ok(LezOutput::with_chained_calls(post_states, chained_calls))
+        let accs: Vec<Account> = post_states.iter().map(|ps| ps.account().clone()).collect();
+        let claims: Vec<AutoClaim> = post_states.iter().map(|ps| {
+            match ps.required_claim() {
+                Some(claim) => AutoClaim::Claimed(claim),
+                None => AutoClaim::None,
+            }
+        }).collect();
+        Ok(SpelOutput::execute_with_claims(&accs, &claims, chained_calls))
     }
 }

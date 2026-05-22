@@ -10,8 +10,8 @@ nssa = { git = "https://github.com/logos-blockchain/logos-execution-zone.git", t
 common = { git = "https://github.com/logos-blockchain/logos-execution-zone.git", tag = "v0.2.0-rc3" }
 wallet = { git = "https://github.com/logos-blockchain/logos-execution-zone.git", tag = "v0.2.0-rc3" }
 sequencer_service_rpc = { git = "https://github.com/logos-blockchain/logos-execution-zone.git", tag = "v0.2.0-rc3" }
-lez-framework = { git = "https://github.com/logos-co/spel", rev = "eed4ad7" }
-lez-cli = { git = "https://github.com/logos-co/spel", rev = "eed4ad7" }
+spel-framework = { git = "https://github.com/logos-co/spel.git", branch = "feat/207-logos-module-codegen" }
+spel-cli = { git = "https://github.com/logos-co/spel.git", branch = "feat/207-logos-module-codegen" }
 borsh = "1.5.7"
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde_json = "1.0"

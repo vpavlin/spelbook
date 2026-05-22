@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use base64::engine::general_purpose::STANDARD as BASE64;
 /// LEZ Program Registry CLI
 ///
 /// On-chain registry for LEZ programs + Logos Storage (Codex) IDL management.
@@ -19,6 +18,8 @@ use nssa::{
     AccountId, PublicTransaction,
     public_transaction::{Message, WitnessSet},
 };
+use common::transaction::NSSATransaction;
+use sequencer_service_rpc::RpcClient as _;
 use registry_core::{Instruction, ProgramEntry, RegistryState, compute_program_entry_pda, compute_registry_state_pda};
 use wallet::WalletCore;
 
@@ -200,20 +201,22 @@ fn format_program_id(pid: &nssa::ProgramId) -> String {
 async fn submit_and_confirm(wallet_core: &WalletCore, tx: PublicTransaction, label: &str) -> Result<String> {
     let response = wallet_core
         .sequencer_client
-        .send_tx_public(tx)
+        .send_transaction(NSSATransaction::Public(tx))
         .await
         .context("failed to submit transaction")?;
 
+    let tx_hash = response;
+
     println!("📤 {} submitted", label);
-    println!("   tx_hash: {}", response.tx_hash);
+    println!("   tx_hash: {}", tx_hash);
     println!("   Waiting for confirmation...");
 
-    let poller = wallet::poller::TxPoller::new(wallet_core.config().clone(), wallet_core.sequencer_client.clone());
+    let poller = wallet::poller::TxPoller::new(&wallet_core.config().clone(), wallet_core.sequencer_client.clone());
 
-    match poller.poll_tx(response.tx_hash.clone()).await {
+    match poller.poll_tx(tx_hash.clone()).await {
         Ok(_) => {
             println!("✅ Confirmed!");
-            Ok(response.tx_hash.to_string())
+            Ok(tx_hash.to_string())
         }
         Err(e) => {
             eprintln!("❌ Not confirmed: {e:#}");
