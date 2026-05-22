@@ -2546,7 +2546,7 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 [[package]]
 name = "lez-cli"
 version = "0.1.0"
-source = "git+https://github.com/jimmy-claw/spel?rev=eed4ad7#eed4ad7bbda2322a5972497caec14f9a1f191d96"
+source = "git+https://github.com/logos-co/spel?rev=eed4ad7#eed4ad7bbda2322a5972497caec14f9a1f191d96"
 dependencies = [
  "base58",
  "borsh",
@@ -2564,7 +2564,7 @@ dependencies = [
 [[package]]
 name = "lez-framework"
 version = "0.1.0"
-source = "git+https://github.com/jimmy-claw/spel?rev=eed4ad7#eed4ad7bbda2322a5972497caec14f9a1f191d96"
+source = "git+https://github.com/logos-co/spel?rev=eed4ad7#eed4ad7bbda2322a5972497caec14f9a1f191d96"
 dependencies = [
  "borsh",
  "lez-framework-core",
@@ -2575,7 +2575,7 @@ dependencies = [
 [[package]]
 name = "lez-framework-core"
 version = "0.1.0"
-source = "git+https://github.com/jimmy-claw/spel?rev=eed4ad7#eed4ad7bbda2322a5972497caec14f9a1f191d96"
+source = "git+https://github.com/logos-co/spel?rev=eed4ad7#eed4ad7bbda2322a5972497caec14f9a1f191d96"
 dependencies = [
  "borsh",
  "nssa_core",
@@ -2588,7 +2588,7 @@ dependencies = [
 [[package]]
 name = "lez-framework-macros"
 version = "0.1.0"
-source = "git+https://github.com/jimmy-claw/spel?rev=eed4ad7#eed4ad7bbda2322a5972497caec14f9a1f191d96"
+source = "git+https://github.com/logos-co/spel?rev=eed4ad7#eed4ad7bbda2322a5972497caec14f9a1f191d96"
 dependencies = [
  "proc-macro2",
  "quote",

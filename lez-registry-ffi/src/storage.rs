@@ -72,7 +72,7 @@ pub async fn upload_async(logos_storage_url: &str, file_path: &str) -> String {
     let resp = match client
         .post(&url)
         .header("Content-Type", "application/octet-stream")
-        .header("Content-Disposition", format!("attachment; filename="{}"", filename))
+        .header("Content-Disposition", format!("attachment; filename=\"{}\"", filename))
         .body(file_bytes)
         .send()
         .await

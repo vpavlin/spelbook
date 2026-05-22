@@ -1,0 +1,10 @@
+{
+  "name": "spelbook",
+  "version": "0.1.0",
+  "description": "LEZ Program Registry — IDL discovery and storage",
+  "type": "blockchain",
+  "ui": {
+    "title": "Spelbook",
+    "icon": "📖"
+  }
+}

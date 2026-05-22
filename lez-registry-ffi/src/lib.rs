@@ -9,6 +9,7 @@
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 
+mod cache;
 mod registry;
 mod storage;
 
@@ -95,6 +96,46 @@ pub extern "C" fn lez_registry_get_by_id(args_json: *const c_char) -> *mut c_cha
     };
     let result = registry::get_by_id(args);
     to_cstring(result)
+}
+
+// ── Cache / Search Operations ─────────────────────────────────────────────────
+
+/// Search cached program entries by name, description, or tags.
+///
+/// args_json: `{"query": "token"}` — `query` is required; pass `""` to return all.
+///
+/// Returns:
+/// ```json
+/// {"success": true, "programs": [...], "count": N}
+/// ```
+/// or
+/// ```json
+/// {"success": false, "error": "..."}
+/// ```
+#[no_mangle]
+pub extern "C" fn lez_registry_search(args_json: *const c_char) -> *mut c_char {
+    let args = match cstr_to_str(args_json) {
+        Ok(s) => s,
+        Err(e) => return error_json(&e),
+    };
+
+    let v: serde_json::Value = match serde_json::from_str(args) {
+        Ok(v) => v,
+        Err(e) => return error_json(&format!("invalid JSON: {}", e)),
+    };
+
+    let query = v["query"].as_str().unwrap_or("");
+    let programs = cache::search_cache(query);
+    let count = programs.len();
+
+    to_cstring(
+        serde_json::json!({
+            "success": true,
+            "programs": programs,
+            "count": count,
+        })
+        .to_string(),
+    )
 }
 
 // ── Logos Storage Operations ──────────────────────────────────────────────────

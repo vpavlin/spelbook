@@ -13,11 +13,12 @@ use nssa::{
     AccountId, PublicTransaction,
 };
 use registry_core::{
-    compute_program_entry_pda, compute_registry_state_pda, Instruction, ProgramEntry, RegisterArgs, RegistryState,
-    UpdateArgs,
+    compute_program_entry_pda, compute_registry_state_pda, Instruction, ProgramEntry, RegistryState,
 };
 use serde_json::{json, Value};
 use wallet::WalletCore;
+
+use crate::cache;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -233,15 +234,30 @@ async fn register_async(v: &Value) -> String {
     )
     .await
     {
-        Ok(tx_hash) => json!({
-            "success": true,
-            "tx_hash": tx_hash,
-            "entry_pda": entry_pda_id.to_string(),
-            "name": name,
-            "version": version,
-            "idl_cid": idl_cid,
-        })
-        .to_string(),
+        Ok(tx_hash) => {
+            // Populate the local cache so the entry is immediately searchable.
+            let entry_json = json!({
+                "program_id": program_id_hex,
+                "name": name,
+                "version": version,
+                "author": author_id.to_string(),
+                "idl_cid": idl_cid,
+                "description": v["description"].as_str().unwrap_or(""),
+                "tags": v["tags"].as_array().cloned().unwrap_or_default(),
+                "registered_at": 0,
+            });
+            cache::upsert_entry(entry_json);
+
+            json!({
+                "success": true,
+                "tx_hash": tx_hash,
+                "entry_pda": entry_pda_id.to_string(),
+                "name": name,
+                "version": version,
+                "idl_cid": idl_cid,
+            })
+            .to_string()
+        }
         Err(e) => json!({"success": false, "error": e}).to_string(),
     }
 }
@@ -544,18 +560,24 @@ async fn get_by_id_async(v: &Value) -> String {
                 .flat_map(|w| w.to_be_bytes())
                 .map(|b| format!("{:02x}", b))
                 .collect();
+
+            let entry_json = json!({
+                "program_id": pid_hex,
+                "name": entry.name,
+                "version": entry.version,
+                "author": entry.author.to_string(),
+                "idl_cid": entry.idl_cid,
+                "description": entry.description,
+                "registered_at": entry.registered_at,
+                "tags": entry.tags,
+            });
+
+            // Populate the local cache so the entry is available for search.
+            cache::upsert_entry(entry_json.clone());
+
             json!({
                 "success": true,
-                "entry": {
-                    "program_id": pid_hex,
-                    "name": entry.name,
-                    "version": entry.version,
-                    "author": entry.author.to_string(),
-                    "idl_cid": entry.idl_cid,
-                    "description": entry.description,
-                    "registered_at": entry.registered_at,
-                    "tags": entry.tags,
-                },
+                "entry": entry_json,
                 "entry_pda": entry_pda_id.to_string(),
             })
             .to_string()

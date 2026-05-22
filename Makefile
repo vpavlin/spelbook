@@ -22,12 +22,14 @@ REGISTRY_BIN := $(PROGRAMS_DIR)/registry.bin
 
 # ── Targets ──────────────────────────────────────────────────────────────────
 
-.PHONY: help build check idl cli test deploy inspect status clean
+.PHONY: help build build-ffi build-module check idl cli test deploy inspect status clean
 
 help: ## Show this help
 	@echo "lez-registry — Make Targets"
 	@echo ""
 	@echo "  make build              Build the zkVM guest binary (needs risc0 toolchain)"
+	@echo "  make build-ffi          Build the lez-registry-ffi shared library (release)"
+	@echo "  make build-module       Build the Qt spelbook-module (requires Qt6 + cmake)"
 	@echo "  make check              cargo check host crates (no risc0 needed)"
 	@echo "  make idl                Generate IDL JSON from #[nssa_program] annotations"
 	@echo "  make cli ARGS=\"...\"     Run the IDL-driven CLI (pass args via ARGS=)"
@@ -48,8 +50,20 @@ build: ## Build the registry zkVM guest binary
 	@echo "✅ Guest binary built: $(REGISTRY_BIN)"
 	@ls -la $(REGISTRY_BIN) 2>/dev/null || true
 
+build-ffi: ## Build the lez-registry-ffi shared library (release, no risc0 needed)
+	cargo build --release -p lez-registry-ffi
+	@echo ""
+	@echo "✅ FFI library built: target/release/liblez_registry_ffi.so"
+
+build-module: build-ffi ## Build the Qt spelbook-module (requires Qt6 + cmake)
+	cmake -S spelbook-module -B spelbook-module/build -DCMAKE_BUILD_TYPE=Release
+	cmake --build spelbook-module/build
+	@echo ""
+	@echo "✅ Qt spelbook-module built: spelbook-module/build/"
+
 check: ## Verify host crates compile (no risc0 toolchain needed)
 	cargo check -p registry_core -p registry_program -p registry-cli
+	cargo check -p lez-registry-ffi
 	@echo ""
 	@echo "✅ cargo check passed"
 
